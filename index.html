@@ -10,6 +10,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mundial 2026">
 <link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
 :root{--blue:#0d47a1;--light-blue:#1976d2;--white:#ffffff;--dark:#0a1929;--card:#132f4c;--text:#e0e0e0;--win:#27ae60;--loss:#e74c3c;--draw:#f39c12}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -314,15 +316,75 @@ const ADMIN_PASS='admin2026';
 const PRONO_KEY='mundial2026_pronosticos';
 const USER_KEY='mundial2026_user';
 
-function getPronosticos(){try{return JSON.parse(localStorage.getItem(PRONO_KEY))||{}}catch(e){return {}}}
-function guardarPronosticos(data){try{localStorage.setItem(PRONO_KEY,JSON.stringify(data))}catch(e){}}
-function getPronostico(email){const p=getPronosticos();return p[email]||null}
-function setPronostico(email,data){const p=getPronosticos();p[email]=data;guardarPronosticos(p);}
+const firebaseConfig = {
+  apiKey: "AIzaSyBwnT5REGtDAI-gp13tzbiAaWqggZBVlG4",
+  authDomain: "mundial-medios.firebaseapp.com",
+  projectId: "mundial-medios",
+  storageBucket: "mundial-medios.firebasestorage.app",
+  messagingSenderId: "863530204911",
+  appId: "1:863530204911:web:ed8de5fc0260196eaee51a",
+  measurementId: "G-9NJPL6W6H8"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-function save(){
-  try{localStorage.setItem('mundial2026',JSON.stringify(state))}catch(e){}
+async function getPronosticos(){
+  try{
+    const snap = await db.collection('pronosticos').get();
+    const data = {};
+    snap.forEach(doc => { data[doc.id] = doc.data(); });
+    localStorage.setItem(PRONO_KEY, JSON.stringify(data));
+    return data;
+  }catch(e){
+    try{return JSON.parse(localStorage.getItem(PRONO_KEY))||{}}catch(e2){return {}}
+  }
 }
-function load(){
+async function guardarPronosticos(data){
+  try{
+    localStorage.setItem(PRONO_KEY, JSON.stringify(data));
+    const batch = db.batch();
+    for(const[email,p]of Object.entries(data))
+      batch.set(db.collection('pronosticos').doc(email), p);
+    await batch.commit();
+  }catch(e){}
+}
+async function getPronostico(email){
+  try{
+    const doc = await db.collection('pronosticos').doc(email).get();
+    if(doc.exists)return doc.data();
+    return null;
+  }catch(e){
+    try{const p=JSON.parse(localStorage.getItem(PRONO_KEY))||{};return p[email]||null}catch(e2){return null}
+  }
+}
+async function setPronostico(email,data){
+  try{
+    localStorage.setItem(PRONO_KEY, JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(PRONO_KEY)||'{}'),{[email]:data})));
+    await db.collection('pronosticos').doc(email).set(data);
+  }catch(e){}
+}
+let pronosticoUnsub = null;
+function escucharPronosticos(cb){
+  if(pronosticoUnsub)pronosticoUnsub();
+  pronosticoUnsub = db.collection('pronosticos').onSnapshot(snap=>{
+    const data={};
+    snap.forEach(doc=>{data[doc.id]=doc.data()});
+    localStorage.setItem(PRONO_KEY, JSON.stringify(data));
+    cb(data);
+  },()=>{});
+}
+
+async function save(){
+  try{
+    localStorage.setItem('mundial2026',JSON.stringify(state));
+    await db.collection('state').doc('global').set(state);
+  }catch(e){}
+}
+async function load(){
+  try{
+    const doc = await db.collection('state').doc('global').get();
+    if(doc.exists){Object.assign(state, doc.data());return true}
+  }catch(e){}
   try{
     const d=localStorage.getItem('mundial2026');
     if(d){const p=JSON.parse(d);Object.assign(state,p);return true}
@@ -335,13 +397,14 @@ function updateAdminVisibility(){
   const lockBtn=document.getElementById('btnAdminLock');
   if(lockBtn)lockBtn.textContent=isAdmin?'🔓 Salir Admin':'🔐 Admin';
   if(!isAdmin){
+    if(pronosticoUnsub){pronosticoUnsub();pronosticoUnsub=null;}
     const activePronTab=document.getElementById('tab-pronosticos');
     if(activePronTab&&activePronTab.classList.contains('active')){
       const groupsBtn=document.querySelector('.tabs .tab');
       if(groupsBtn)cambiarTab('grupos',groupsBtn);
     }
   }else{
-    renderTabPronosticos();
+    escucharPronosticos(()=>renderTabPronosticos());
   }
 }
 function getPredictionMatches(gid){
@@ -424,7 +487,6 @@ function ingresarAdmin(){
   currentUser=null;
   userPronostico=null;
   updateAdminVisibility();
-  renderTabPronosticos();
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-pronosticos').classList.add('active');
@@ -432,7 +494,7 @@ function ingresarAdmin(){
   renderPanelAlumno();
 }
 
-function ingresarAlumno(){
+async function ingresarAlumno(){
   const emailInput=document.getElementById('loginEmail');
   const apodoInput=document.getElementById('loginApodo');
   const errorBox=document.getElementById('loginError');
@@ -441,7 +503,7 @@ function ingresarAlumno(){
   const apodo=String(apodoInput?apodoInput.value:'').trim();
   if(!email||!email.includes('@')){if(errorBox)errorBox.textContent='Ingresá un email válido.';return;}
   if(!apodo){if(errorBox)errorBox.textContent='Ingresá un apodo.';return;}
-  const existente=getPronostico(email);
+  const existente=await getPronostico(email);
   if(existente){
     currentUser={email,apodo:existente.apodo||apodo,readOnly:true};
     userPronostico=existente;
@@ -454,7 +516,7 @@ function ingresarAlumno(){
   if(modal)modal.style.display='none';
   renderPanelAlumno();
 }
-function enviarPronostico(){
+async function enviarPronostico(){
   if(!currentUser||currentUser.readOnly||userPronostico)return;
   const predicciones=[];
   for(let i=0;i<6;i++){
@@ -467,14 +529,14 @@ function enviarPronostico(){
     predicciones.push({matchIdx:i,local:l,visitante:v});
   }
   const payload={apodo:currentUser.apodo,grupo:selectedPronosticoGroup,predicciones,fechaEnvio:new Date().toISOString()};
-  setPronostico(currentUser.email,payload);
+  await setPronostico(currentUser.email,payload);
   userPronostico=payload;
   currentUser.readOnly=true;
   renderPanelAlumno();
   if(isAdmin)renderTabPronosticos();
   alert('✅ Pronóstico enviado y bloqueado.');
 }
-function renderTabPronosticos(){
+async function renderTabPronosticos(){
   const cont=document.getElementById('tab-pronosticos');
   if(!cont)return;
   if(!isAdmin){
@@ -482,7 +544,7 @@ function renderTabPronosticos(){
     return;
   }
   const filtro=document.getElementById('filtroPronosticosGrupo')?.value||'TODOS';
-  const allPronos=getPronosticos();
+  const allPronos=await getPronosticos();
   const emails=Object.keys(allPronos);
 
   let html='<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
@@ -576,7 +638,7 @@ function renderTabPronosticos(){
 
   cont.innerHTML=html;
 }
-function toggleAdminMode(){
+async function toggleAdminMode(){
   if(isAdmin){
     isAdmin=false;
     updateAdminVisibility();
@@ -587,35 +649,31 @@ function toggleAdminMode(){
   if(pass!=='admin2026'){alert('Contraseña incorrecta.');return;}
   isAdmin=true;
   updateAdminVisibility();
-  renderTabPronosticos();
   renderPanelAlumno();
 }
 
-function exportarPronosticos(){
-  const data=getPronosticos();
+async function exportarPronosticos(){
+  const data=await getPronosticos();
   if(Object.keys(data).length===0){alert('No hay pronósticos para exportar.');return;}
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='pronosticos_mundial2026.json';a.click();
   URL.revokeObjectURL(a.href);
 }
 
-function importarPronosticos(e){
+async function importarPronosticos(e){
   const file=e.target.files[0];if(!file)return;
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    try{
-      const data=JSON.parse(ev.target.result);
-      const actuales=getPronosticos();
-      let count=0;
-      for(const[email,p]of Object.entries(data)){
-        if(!actuales[email]){actuales[email]=p;count++;}
-      }
-      guardarPronosticos(actuales);
-      renderTabPronosticos();
-      alert('✅ '+count+' pronósticos importados. ('+(Object.keys(data).length-count)+' ya existentes omitidos)');
-    }catch(ex){alert('❌ Error al importar. Revisá el archivo.');}
-  };
-  reader.readAsText(file);
+  const text=await file.text();
+  try{
+    const data=JSON.parse(text);
+    const actuales=await getPronosticos();
+    let count=0;
+    for(const[email,p]of Object.entries(data)){
+      if(!actuales[email]){actuales[email]=p;count++;}
+    }
+    await guardarPronosticos(actuales);
+    renderTabPronosticos();
+    alert('✅ '+count+' pronósticos importados. ('+(Object.keys(data).length-count)+' ya existentes omitidos)');
+  }catch(ex){alert('❌ Error al importar. Revisá el archivo.');}
   e.target.value='';
 }
 
@@ -784,7 +842,7 @@ function renderGrupo(gid){
 }
 
 let _restoreFocus = null;
-function actualizarGrupo(gid,i){
+async function actualizarGrupo(gid,i){
   if(!isAdmin)return;
   const grupo=state.grupos[gid];
   const hIn=document.getElementById('g-'+gid+'-'+i+'-h');
@@ -801,7 +859,7 @@ function actualizarGrupo(gid,i){
     grupo.matches[i].as=null;aIn.classList.remove('has-score');
   }
   _restoreFocus = document.activeElement ? document.activeElement.id : null;
-  save();
+  await save();
   renderGrupos();
   renderEliminatorias();
   renderBracket();
@@ -814,7 +872,7 @@ function actualizarGrupo(gid,i){
   _restoreFocus=null;
 }
 
-function simularGrupo(target){
+async function simularGrupo(target){
   if(!isAdmin)return;
   const avg=parseFloat(document.getElementById('golAvg').value)||1.5;
   const groups=target==='all'?Object.keys(GRUPOS):[target];
@@ -824,7 +882,7 @@ function simularGrupo(target){
       m.hs=randGol(avg);m.as=randGol(avg);
     }
   }
-  save();
+  await save();
   renderGrupos();
   renderEliminatorias();
   renderBracket();
@@ -842,7 +900,7 @@ function randGol(avg){
   return Math.floor(Math.random()*4)+3;
 }
 
-function simularPendientes(){
+async function simularPendientes(){
   if(!isAdmin){alert('Solo disponible en modo admin.');return;}
   const avg=parseFloat(document.getElementById('golAvg')?.value)||1.5;
   for(const[gid]of Object.entries(GRUPOS)){
@@ -869,7 +927,7 @@ function simularPendientes(){
     const eq=resolverPartidoEliminacion(104);
     if(eq&&eq.home&&eq.away){fm.match.hs=randGol(avg);fm.match.as=randGol(avg);}
   }
-  save();
+  await save();
   renderGrupos();
   renderEliminatorias();
   renderBracket();
@@ -878,11 +936,11 @@ function simularPendientes(){
   alert('✅ Partidos pendientes simulados exitosamente');
 }
 
-function reiniciarTodo(){
+async function reiniciarTodo(){
   if(!isAdmin){alert('Solo disponible en modo admin.');return;}
   if(!confirm('¿Estás seguro? Se borrarán todos los resultados.'))return;
   state=initState();
-  save();
+  await save();
   renderGrupos();
   renderEliminatorias();
   renderBracket();
@@ -1066,7 +1124,7 @@ function renderKoTeam(team,side,id,key){
   return '<span class="team-name '+(side==='home'?'home':'away')+'">'+f+' '+team.team+'</span>';
 }
 
-function actualizarKO(id,key){
+async function actualizarKO(id,key){
   if(!isAdmin)return;
   const hIn=document.getElementById('ko-'+key+'-'+id+'-h');
   const aIn=document.getElementById('ko-'+key+'-'+id+'-a');
@@ -1095,7 +1153,7 @@ function actualizarKO(id,key){
     }else{matchObj.pHome=null;matchObj.pAway=null;}
   }else if(!hValido||!aValido){matchObj.pHome=null;matchObj.pAway=null;}
   _restoreFocus = document.activeElement ? document.activeElement.id : null;
-  save();
+  await save();
   renderEliminatorias();
   renderBracket();
   renderChampion();
@@ -1107,11 +1165,11 @@ function actualizarKO(id,key){
   _restoreFocus=null;
 }
 
-function simularKOCompleto(){
+async function simularKOCompleto(){
   if(!isAdmin)return;
   const avg=parseFloat(document.getElementById('koGolAvg')?.value)||1.5;
   simularTodasKO(avg);
-  save();
+  await save();
   renderEliminatorias();
   renderBracket();
   renderChampion();
@@ -1264,8 +1322,8 @@ function cambiarTab(tab,btn){
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(e => console.log('SW:', e));
 }
-function initApp(){
-  if(!load()){state=initState();save();}
+async function initApp(){
+  if(!(await load())){state=initState();await save();}
   renderGrupos();
   renderEliminatorias();
   renderBracket();
