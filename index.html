@@ -148,6 +148,7 @@ header h1 .subtitle{font-size:0.6rem;color:rgba(255,255,255,0.5);font-weight:400
   <div class="header-actions">
     <button class="btn btn-white admin-only" id="btnSimularPendientes" onclick="simularPendientes()">&#9889; Simular Pendientes</button>
     <button class="btn btn-blue admin-only" id="btnReiniciarTodo" onclick="reiniciarTodo()">&#8635; Reiniciar Todo</button>
+    <button class="btn btn-danger admin-only" id="btnCambiarPass" onclick="cambiarPassword()">🔑 Cambiar Pass</button>
     <button class="btn btn-white" id="btnAdminLock" onclick="toggleAdminMode()">🔐 Admin</button>
   </div>
 </header>
@@ -316,6 +317,24 @@ const ADMIN_PASS='admin2026';
 const PRONO_KEY='mundial2026_pronosticos';
 const USER_KEY='mundial2026_user';
 
+async function getAdminPass() {
+  try {
+    const doc = await db.collection('admin').doc('config').get();
+    if (doc.exists && doc.data().password) return doc.data().password;
+  } catch(e) {}
+  const local = localStorage.getItem('mundial2026_admin');
+  if (local) { try { const p = JSON.parse(local); if (p.password) return p.password; } catch(e2) {} }
+  return ADMIN_PASS;
+}
+async function setAdminPass(newPass) {
+  try {
+    await db.collection('admin').doc('config').set({ email: ADMIN_EMAIL, password: newPass });
+    localStorage.setItem('mundial2026_admin', JSON.stringify({ email: ADMIN_EMAIL, password: newPass }));
+  } catch(e) {
+    localStorage.setItem('mundial2026_admin', JSON.stringify({ email: ADMIN_EMAIL, password: newPass }));
+  }
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyBwnT5REGtDAI-gp13tzbiAaWqggZBVlG4",
   authDomain: "mundial-medios.firebaseapp.com",
@@ -425,7 +444,7 @@ function renderPanelAlumno(){
     for(const p of userPronostico.predicciones)byIdx[p.matchIdx]=p;
   }
   let html='<div class="user-meta"><span><strong>Alumno:</strong> '+currentUser.apodo+' ('+currentUser.email+')</span><span>'+(bloqueado?'Modo solo lectura':'Podés cargar un pronóstico')+'</span></div>';
-  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label for="pred-grupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label><select id="pred-grupo" '+(bloqueado?'disabled':'')+' onchange="cambiarGrupoPronostico(this.value)" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">'+Object.keys(GRUPOS).map(g=>'<option value="'+g+'" '+(grupoActivo===g?'selected':'')+'>'+g+'</option>').join('')+'</select></div>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label for="pred-grupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label><select id="pred-grupo" '+(bloqueado?'disabled':'')+' onchange="cambiarGrupoPronostico(this.value)" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">'+Object.keys(GRUPOS).map(g=>'<option value="'+g+'" '+(grupoActivo===g?'selected':'')+'>'+g+'</option>').join('')+'</select><span style="font-size:0.7rem;color:rgba(255,255,255,0.35);font-style:italic">&#9660; desplegá para elegir otro grupo</span></div>';
   html+='<div class="prediction-grid">';
   for(const partido of partidos){
     const saved=byIdx[partido.idx]||{};
@@ -471,7 +490,7 @@ function toggleLoginMode(){
   }
 }
 
-function ingresarAdmin(){
+async function ingresarAdmin(){
   const emailInput=document.getElementById('loginAdminEmail');
   const passInput=document.getElementById('loginAdminPass');
   const errorBox=document.getElementById('loginError');
@@ -480,7 +499,8 @@ function ingresarAdmin(){
   const pass=passInput?passInput.value:'';
   if(!email||!email.includes('@')){if(errorBox)errorBox.textContent='Ingresá un email válido.';return;}
   if(email!==normalizarEmail(ADMIN_EMAIL)){if(errorBox)errorBox.textContent='Email de administrador no reconocido.';return;}
-  if(pass!==ADMIN_PASS){if(errorBox)errorBox.textContent='Contraseña incorrecta.';return;}
+  const storedPass=await getAdminPass();
+  if(pass!==storedPass){if(errorBox)errorBox.textContent='Contraseña incorrecta.';return;}
   const modal=document.getElementById('loginModal');
   if(modal)modal.style.display='none';
   isAdmin=true;
@@ -646,10 +666,25 @@ async function toggleAdminMode(){
     return;
   }
   const pass=prompt('Contraseña de admin:');
-  if(pass!=='admin2026'){alert('Contraseña incorrecta.');return;}
+  const storedPass=await getAdminPass();
+  if(pass!==storedPass){alert('Contraseña incorrecta.');return;}
   isAdmin=true;
   updateAdminVisibility();
   renderPanelAlumno();
+}
+
+async function cambiarPassword() {
+  if (!isAdmin) return;
+  const oldPass = prompt('Contraseña actual:');
+  if (!oldPass) return;
+  const storedPass = await getAdminPass();
+  if (oldPass !== storedPass) { alert('Contraseña actual incorrecta.'); return; }
+  const newPass = prompt('Nueva contraseña (mín. 4 caracteres):');
+  if (!newPass || newPass.length < 4) { alert('La contraseña debe tener al menos 4 caracteres.'); return; }
+  const confirmPass = prompt('Confirmar nueva contraseña:');
+  if (newPass !== confirmPass) { alert('Las contraseñas no coinciden.'); return; }
+  await setAdminPass(newPass);
+  alert('✅ Contraseña cambiada exitosamente.');
 }
 
 async function exportarPronosticos(){
