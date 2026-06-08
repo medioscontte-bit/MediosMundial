@@ -377,6 +377,10 @@ async function getPronostico(email){
   try{
     const doc = await db.collection('pronosticos').doc(email).get();
     if(doc.exists)return doc.data();
+    try{
+      const stored=JSON.parse(localStorage.getItem(PRONO_KEY)||'{}');
+      if(stored[email]){delete stored[email];localStorage.setItem(PRONO_KEY,JSON.stringify(stored));}
+    }catch(e2){}
     return null;
   }catch(e){
     try{const p=JSON.parse(localStorage.getItem(PRONO_KEY))||{};return p[email]||null}catch(e2){return null}
@@ -386,7 +390,10 @@ async function setPronostico(email,data){
   try{
     localStorage.setItem(PRONO_KEY, JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(PRONO_KEY)||'{}'),{[email]:data})));
     await db.collection('pronosticos').doc(email).set(data);
-  }catch(e){}
+  }catch(e){
+    if(!navigator.onLine)alert('❌ Sin conexión a internet. Conectate y volvé a intentar.');
+    else alert('❌ Error de servidor. Tus datos se guardaron localmente pero no serán visibles hasta que se sincronicen.');
+  }
 }
 let pronosticoUnsub = null;
 function escucharPronosticos(cb){
