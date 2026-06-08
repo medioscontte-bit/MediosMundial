@@ -352,6 +352,19 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+db.settings({merge:true});
+let firebaseStatus = 'checking';
+
+async function testFirebase(){
+  try{
+    await db.collection('_test').doc('_ping').set({t:Date.now()},{merge:true});
+    await db.collection('_test').doc('_ping').delete();
+    firebaseStatus = 'ok';
+  }catch(e){
+    firebaseStatus = 'error';
+  }
+}
+setTimeout(testFirebase,1000);
 
 async function getPronosticos(){
   try{
@@ -359,10 +372,20 @@ async function getPronosticos(){
     const data = {};
     snap.forEach(doc => { data[doc.id] = doc.data(); });
     localStorage.setItem(PRONO_KEY, JSON.stringify(data));
+    firebaseStatus = 'ok';
     return data;
   }catch(e){
+    firebaseStatus = 'error';
     try{return JSON.parse(localStorage.getItem(PRONO_KEY))||{}}catch(e2){return {}}
   }
+}
+
+async function sincronizarFirebase(){
+  const banner = document.getElementById('fbStatus');
+  if(banner)banner.innerHTML='🔄 Sincronizando...';
+  firebaseStatus = 'checking';
+  await testFirebase();
+  renderTabPronosticos();
 }
 async function guardarPronosticos(data){
   try{
@@ -398,25 +421,32 @@ async function setPronostico(email,data){
 let pronosticoUnsub = null;
 function escucharPronosticos(cb){
   if(pronosticoUnsub)pronosticoUnsub();
+  firebaseStatus='checking';
   pronosticoUnsub = db.collection('pronosticos').onSnapshot(snap=>{
     const data={};
     snap.forEach(doc=>{data[doc.id]=doc.data()});
     localStorage.setItem(PRONO_KEY, JSON.stringify(data));
+    firebaseStatus='ok';
     cb(data);
-  },()=>{});
+  },()=>{
+    firebaseStatus='error';
+    cb(null);
+  });
 }
 
 async function save(){
   try{
     localStorage.setItem('mundial2026',JSON.stringify(state));
     await db.collection('state').doc('global').set(state);
-  }catch(e){}
+    firebaseStatus='ok';
+  }catch(e){firebaseStatus='error';}
 }
 async function load(){
   try{
     const doc = await db.collection('state').doc('global').get();
-    if(doc.exists){Object.assign(state, doc.data());return true}
-  }catch(e){}
+    if(doc.exists){Object.assign(state, doc.data());firebaseStatus='ok';return true}
+    firebaseStatus='ok';
+  }catch(e){firebaseStatus='error';}
   try{
     const d=localStorage.getItem('mundial2026');
     if(d){const p=JSON.parse(d);Object.assign(state,p);return true}
@@ -580,7 +610,12 @@ async function renderTabPronosticos(){
   const allPronos=await getPronosticos();
   const emails=Object.keys(allPronos);
 
-  let html='<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
+  let html='<div id="fbStatus" style="padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:0.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;background:'+(firebaseStatus==='ok'?'rgba(39,174,96,0.12);color:#7dcea0;border:1px solid rgba(39,174,96,0.3)':firebaseStatus==='error'?'rgba(231,76,60,0.12);color:#f1948a;border:1px solid rgba(231,76,60,0.3)':'rgba(243,156,18,0.12);color:#f8c471;border:1px solid rgba(243,156,18,0.3)')+'">';
+  html+='<span>'+(firebaseStatus==='ok'?'✅ Firebase conectado':firebaseStatus==='error'?'❌ Firebase no responde — mostrando datos locales':'⏳ Verificando conexión...')+'</span>';
+  html+='<button class="btn btn-sm '+(firebaseStatus==='ok'?'btn-blue':'btn-white')+'" onclick="sincronizarFirebase()">🔄 Sincronizar</button>';
+  html+='</div>';
+
+  html+='<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
   html+='<h3 style="color:var(--light-blue);font-size:0.95rem">Pronósticos de Alumnos</h3>';
   html+='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
   html+='<label for="filtroPronosticosGrupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label>';
