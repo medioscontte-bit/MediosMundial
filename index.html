@@ -584,6 +584,17 @@ async function renderTabPronosticos(){
   html+='<button class="btn btn-sm btn-blue" onclick="exportarPronosticos()">📤 Exportar</button>';
   html+='<button class="btn btn-sm btn-blue" onclick="document.getElementById(\'importPronFile\').click()">📥 Importar</button>';
   html+='<input type="file" id="importPronFile" accept=".json" style="display:none" onchange="importarPronosticos(event)">';
+  html+='<button class="btn btn-sm btn-white" onclick="toggleResultadosEditor()">📥 Cargar Resultados</button>';
+  html+='</div></div>';
+
+  html+='<div id="resultadosEditor" style="display:none;background:var(--card);border:2px solid var(--win);border-radius:10px;padding:12px;margin-bottom:12px">';
+  html+='<h4 style="color:var(--win);font-size:0.9rem;margin-bottom:6px">📥 Cargar Resultados Reales</h4>';
+  html+='<p style="font-size:0.75rem;color:#aaa;margin-bottom:6px">Pegá los resultados acá. Formato: <code style="color:#9fc2ee">Grupo X:</code> abajo <code style="color:#9fc2ee">Equipo1 goles1-goles2 Equipo2</code>. Separá cada grupo con una línea en blanco.</p>';
+  html+='<p style="font-size:0.75rem;color:#f1d293;margin-bottom:6px">💡 Ejemplo:<br><code style="color:#9fc2ee">Grupo A:<br>México 2-1 Sudáfrica<br>Corea del Sur 0-0 República Checa<br><br>Grupo B:<br>Canadá 3-0 Suiza</code></p>';
+  html+='<textarea id="resultadosTextarea" rows="8" style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;font-family:monospace;font-size:0.8rem" placeholder="Grupo A:&#10;México 2-1 Sudáfrica&#10;..."></textarea>';
+  html+='<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">';
+  html+='<button class="btn btn-sm btn-white" onclick="toggleResultadosEditor()">Cancelar</button>';
+  html+='<button class="btn btn-sm btn-blue" onclick="cargarResultadosReales()">✅ Cargar Resultados</button>';
   html+='</div></div>';
 
   if(emails.length===0){
@@ -630,15 +641,18 @@ async function renderTabPronosticos(){
   }
   html+='</tbody></table></div>';
 
+  const hayEvaluaciones=sorted.some(s=>s.evaluados>0);
   const ganadores=sorted.filter(s=>s.evaluados>0&&s.aciertos===s.evaluados);
   if(ganadores.length>0){
-    html+='<div class="ganadores-box"><h2>🏆 GANADORES 🏆</h2><p style="color:#ddd;font-size:0.85rem;margin-bottom:8px">Acertaron TODOS los resultados cargados</p>';
+    html+='<div class="ganadores-box"><h2>🏆 GANADORES 🏆</h2><p style="color:#ddd;font-size:0.85rem;margin-bottom:8px">Acertaron TODOS los resultados cargados ('+ganadores[0].aciertos+'/'+ganadores[0].evaluados+')</p>';
     for(const g of ganadores){
-      html+='<div class="ganador-item"><span class="medalla">👑</span> <strong style="color:#fff">'+g.apodo+'</strong> <span style="color:gold">('+g.email+')</span> — Grupo '+g.grupo+' — '+g.aciertos+'/'+g.evaluados+'</div>';
+      html+='<div class="ganador-item"><span class="medalla">👑</span> <strong style="color:#fff">'+g.apodo+'</strong> <span style="color:gold">('+g.email+')</span> — Grupo '+g.grupo+'</div>';
     }
     html+='</div>';
-  }else if(sorted.some(s=>s.evaluados>0)){
-    html+='<div style="background:var(--card);border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.06)"><p style="text-align:center;color:#aaa;font-size:0.85rem">🔍 Aún no hay ganadores. Nadie acertó todos los resultados cargados.</p></div>';
+  }else if(hayEvaluaciones){
+    html+='<div class="ganadores-box" style="border-color:#888;background:var(--card)"><h2 style="color:#888">🔍 Sin Ganadores Aún</h2><p style="color:#aaa;font-size:0.85rem">Nadie acertó todos los resultados cargados. Seguí participando.</p></div>';
+  }else{
+    html+='<div class="ganadores-box" style="border-color:#555;background:var(--card)"><h2 style="color:#888">🏆 GANADORES</h2><p style="color:#666;font-size:0.85rem">Aún no se cargaron resultados reales. Usá el botón <strong style="color:#9fc2ee">📥 Cargar Resultados</strong> de arriba para cargar los resultados del Mundial y descubrir quién ganó.</p></div>';
   }
 
   for(const st of sorted){
@@ -702,6 +716,53 @@ async function cambiarPassword() {
   if (newPass !== confirmPass) { alert('Las contraseñas no coinciden.'); return; }
   await setAdminPass(newPass);
   alert('✅ Contraseña cambiada exitosamente.');
+}
+
+function toggleResultadosEditor(){
+  const ed=document.getElementById('resultadosEditor');
+  if(ed)ed.style.display=ed.style.display==='none'?'block':'none';
+}
+
+async function cargarResultadosReales(){
+  const textarea=document.getElementById('resultadosTextarea');
+  if(!textarea||!textarea.value.trim()){alert('Pegá los resultados en el campo de texto primero.');return;}
+  const lineas=textarea.value.split('\n').map(l=>l.trim()).filter(l=>l);
+  let grupoActual=null;
+  let cargados=0;
+  for(const linea of lineas){
+    const gMatch=linea.match(/^Grupo\s+([A-L]):?$/i);
+    if(gMatch){grupoActual=gMatch[1].toUpperCase();continue;}
+    if(!grupoActual||!GRUPOS[grupoActual])continue;
+    const pMatch=linea.match(/^(.+?)\s+(\d+)\s*[-–]\s*(\d+)\s+(.+)$/);
+    if(!pMatch)continue;
+    const local=pMatch[1].trim(),golL=parseInt(pMatch[2]),golV=parseInt(pMatch[3]),visitante=pMatch[4].trim();
+    const teams=GRUPOS[grupoActual].teams;
+    const hIdx=teams.findIndex(t=>t.toLowerCase()===local.toLowerCase());
+    const aIdx=teams.findIndex(t=>t.toLowerCase()===visitante.toLowerCase());
+    if(hIdx===-1||aIdx===-1)continue;
+    const matches=state.grupos[grupoActual].matches;
+    for(let i=0;i<matches.length;i++){
+      const m=matches[i];
+      if(m.h===hIdx&&m.a===aIdx){
+        m.hs=golL;m.as=golV;
+        cargados++;
+        break;
+      }else if(m.h===aIdx&&m.a===hIdx){
+        m.hs=golV;m.as=golL;
+        cargados++;
+        break;
+      }
+    }
+  }
+  if(cargados===0){alert('No se pudo cargar ningún resultado. Revisá el formato.\nEj: Grupo A:\nMéxico 2-1 Sudáfrica');return;}
+  await save();
+  toggleResultadosEditor();
+  renderGrupos();
+  renderEliminatorias();
+  renderBracket();
+  renderChampion();
+  renderTabPronosticos();
+  alert('✅ '+cargados+' resultados cargados exitosamente.');
 }
 
 async function exportarPronosticos(){
