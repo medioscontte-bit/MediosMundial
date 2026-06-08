@@ -119,6 +119,12 @@ header h1 .subtitle{font-size:0.6rem;color:rgba(255,255,255,0.5);font-weight:400
 .stats-table th{color:#9fc2ee;background:rgba(255,255,255,0.04)}
 .result-ok{color:var(--win);font-weight:700}
 .result-ko{color:var(--loss);font-weight:700}
+.ganadores-box{background:linear-gradient(135deg,rgba(255,215,0,0.12),rgba(255,215,0,0.04));border:2px solid gold;border-radius:12px;padding:16px;margin-bottom:15px;text-align:center}
+.ganadores-box h2{color:gold;font-size:1.3rem}
+.ganadores-box .ganador-item{display:inline-block;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:8px;padding:8px 16px;margin:4px;font-size:1rem}
+.ganadores-box .ganador-item .medalla{font-size:1.5rem}
+.btn-eliminar{background:#c0392b;color:#fff;border:none;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:0.7rem;margin-left:6px;transition:background .2s}
+.btn-eliminar:hover{background:#e74c3c}
 .login-modal{position:fixed;inset:0;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px}
 .login-box{width:100%;max-width:420px;background:#10253d;border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:16px}
 .login-box h2{font-size:1.05rem;color:#fff;margin-bottom:8px}
@@ -624,12 +630,23 @@ async function renderTabPronosticos(){
   }
   html+='</tbody></table></div>';
 
+  const ganadores=sorted.filter(s=>s.evaluados>0&&s.aciertos===s.evaluados);
+  if(ganadores.length>0){
+    html+='<div class="ganadores-box"><h2>🏆 GANADORES 🏆</h2><p style="color:#ddd;font-size:0.85rem;margin-bottom:8px">Acertaron TODOS los resultados cargados</p>';
+    for(const g of ganadores){
+      html+='<div class="ganador-item"><span class="medalla">👑</span> <strong style="color:#fff">'+g.apodo+'</strong> <span style="color:gold">('+g.email+')</span> — Grupo '+g.grupo+' — '+g.aciertos+'/'+g.evaluados+'</div>';
+    }
+    html+='</div>';
+  }else if(sorted.some(s=>s.evaluados>0)){
+    html+='<div style="background:var(--card);border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.06)"><p style="text-align:center;color:#aaa;font-size:0.85rem">🔍 Aún no hay ganadores. Nadie acertó todos los resultados cargados.</p></div>';
+  }
+
   for(const st of sorted){
     const grupo=st.grupo;
     const preds=st.preds;
     html+='<div style="background:var(--card);border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.06)">';
     html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px">';
-    html+='<span><strong style="color:#fff;font-size:0.85rem">'+(st.apodo)+'</strong> <span style="color:#9fb6d1;font-size:0.75rem">('+st.email+')</span></span>';
+    html+='<span><strong style="color:#fff;font-size:0.85rem">'+(st.apodo)+'</strong> <span style="color:#9fb6d1;font-size:0.75rem">('+st.email+')</span> <button class="btn-eliminar" onclick="eliminarPronostico(\''+st.email+'\')" title="Eliminar este pronóstico">🗑️</button></span>';
     html+='<span style="font-size:0.75rem;color:'+(st.aciertos>0?'var(--win)':'#9fb6d1')+'">Grupo '+grupo+' · '+st.aciertos+'/'+st.evaluados+' aciertos</span>';
     html+='</div>';
     html+='<div style="display:grid;gap:4px">';
@@ -710,6 +727,19 @@ async function importarPronosticos(e){
     alert('✅ '+count+' pronósticos importados. ('+(Object.keys(data).length-count)+' ya existentes omitidos)');
   }catch(ex){alert('❌ Error al importar. Revisá el archivo.');}
   e.target.value='';
+}
+
+async function eliminarPronostico(email){
+  if(!isAdmin)return;
+  if(!confirm('¿Eliminar pronóstico de "'+email+'"? Esta acción no se puede deshacer.'))return;
+  document.getElementById('tab-pronosticos').innerHTML='<div class="empty-state">Eliminando...</div>';
+  try{
+    localStorage.setItem(PRONO_KEY, JSON.stringify(Object.fromEntries(
+      Object.entries(JSON.parse(localStorage.getItem(PRONO_KEY)||'{}')).filter(([k])=>k!==email)
+    )));
+    await db.collection('pronosticos').doc(email).delete();
+  }catch(e){}
+  renderTabPronosticos();
 }
 
 function getTeamName(gid,idx){return GRUPOS[gid]?GRUPOS[gid].teams[idx]:''}
