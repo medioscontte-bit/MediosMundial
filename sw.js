@@ -1,4 +1,4 @@
-const CACHE = 'mundial2026-v1';
+const CACHE = 'mundial2026-v2';
 const URLS = ['index.html','manifest.json','icon-192.png','icon-512.png','logo-colegio.jpg'];
 
 self.addEventListener('install', e => {

@@ -1488,7 +1488,11 @@ function cambiarTab(tab,btn){
 }
 
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').catch(e => console.log('SW:', e));
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    for(const r of regs)r.unregister();
+  }).then(() => {
+    navigator.serviceWorker.register('sw.js?_='+Date.now()).catch(() => {});
+  });
 }
 async function initApp(){
   if(!(await load())){state=initState();await save();}
