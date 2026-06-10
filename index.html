@@ -242,6 +242,36 @@ const FLAGS = {
   'Inglaterra':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Croacia':'🇭🇷','Ghana':'🇬🇭','Panamá':'🇵🇦'
 };
 
+const JORNADAS = [
+  { name: 'Jornada 1', matches: [0, 5] },
+  { name: 'Jornada 2', matches: [1, 4] },
+  { name: 'Jornada 3', matches: [2, 3] }
+];
+function getJornadaForMatch(gid, matchIdx) {
+  for (let j = 0; j < JORNADAS.length; j++) {
+    if (JORNADAS[j].matches.includes(matchIdx)) return j;
+  }
+  return -1;
+}
+function isJornadaBloqueada(gid, jIdx) {
+  return state.jornadasBloqueadas.includes(gid + '-' + jIdx);
+}
+function isJornadaCompleta(gid, jIdx) {
+  const matches = state.grupos[gid].matches;
+  return JORNADAS[jIdx].matches.every(i => matches[i].hs !== null && matches[i].hs !== undefined && matches[i].as !== null && matches[i].as !== undefined);
+}
+function jornadasDisponibles() {
+  const disp = [];
+  for (const gid of Object.keys(GRUPOS)) {
+    for (let j = 0; j < JORNADAS.length; j++) {
+      if (!isJornadaBloqueada(gid, j) && !isJornadaCompleta(gid, j)) {
+        disp.push({ grupo: gid, jornadaIdx: j, name: JORNADAS[j].name });
+      }
+    }
+  }
+  return disp;
+}
+
 const R32_MATCHUPS = [
   {id:73,label:'2A vs 2B',home:'2A',away:'2B'},
   {id:74,label:'1E vs 3°(A/B/C/D/F)',home:'1E',away:{type:'3rd',groups:['A','B','C','D','F']}},
@@ -289,7 +319,7 @@ const FINAL_MATCH = {id:104,label:'G101 vs G102',home:101,away:102};
 const GROUP_MATCH_INDEXES = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
 
 function initState(){
-  const s={grupos:{},eliminatorias:{}};
+  const s={grupos:{},eliminatorias:{},jornadasBloqueadas:[]};
   for(const[gid,grupo]of Object.entries(GRUPOS)){
     s.grupos[gid]={
       teams:grupo.teams,
@@ -479,20 +509,23 @@ function renderPanelAlumno(){
     panel.innerHTML='<div style="font-size:0.85rem;color:#b6c5d6">Ingresá con email y apodo para enviar tu pronóstico.</div>';
     return;
   }
-  const bloqueado=!!(currentUser.readOnly||userPronostico);
+  const grupoFinalizado=!!(userPronostico&&Array.isArray(userPronostico.predicciones));
+  const finalizado=!!(userPronostico&&userPronostico.finalizado);
+  const tieneJornada=!!(userPronostico&&userPronostico.jornada);
+  const todoBloqueado=finalizado;
   const grupoActivo=(userPronostico&&userPronostico.grupo)||selectedPronosticoGroup||'A';
   const partidos=getPredictionMatches(grupoActivo);
   const byIdx={};
   if(userPronostico&&Array.isArray(userPronostico.predicciones)){
     for(const p of userPronostico.predicciones)byIdx[p.matchIdx]=p;
   }
-  let html='<div class="user-meta"><span><strong>Alumno:</strong> '+currentUser.apodo+' ('+currentUser.email+')</span><span>'+(bloqueado?'Modo solo lectura':'Podés cargar un pronóstico')+'</span></div>';
-  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label for="pred-grupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label><select id="pred-grupo" '+(bloqueado?'disabled':'')+' onchange="cambiarGrupoPronostico(this.value)" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">'+Object.keys(GRUPOS).map(g=>'<option value="'+g+'" '+(grupoActivo===g?'selected':'')+'>'+g+'</option>').join('')+'</select><span style="font-size:0.7rem;color:rgba(255,255,255,0.35);font-style:italic">&#9660; desplegá para elegir otro grupo</span></div>';
+  let html='<div class="user-meta"><span><strong>Alumno:</strong> '+currentUser.apodo+' ('+currentUser.email+')</span><span>'+(todoBloqueado?'✅ Pronóstico finalizado':'📝 Podés pronosticar el grupo completo, una jornada, o ambos. Finalizá cuando quieras.')+'</span></div>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label for="pred-grupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label><select id="pred-grupo" '+(grupoFinalizado?'disabled':'')+' onchange="cambiarGrupoPronostico(this.value)" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">'+Object.keys(GRUPOS).map(g=>'<option value="'+g+'" '+(grupoActivo===g?'selected':'')+'>'+g+'</option>').join('')+'</select><span style="font-size:0.7rem;color:rgba(255,255,255,0.35);font-style:italic">&#9660; desplegá para elegir otro grupo</span></div>';
   html+='<div class="prediction-grid">';
   for(const partido of partidos){
     const saved=byIdx[partido.idx]||{};
-    html+='<div class="prediction-row"><span class="home">'+partido.home+'</span><div class="'+(bloqueado?'prediction-score readonly':'prediction-score')+'">';
-    if(bloqueado){
+    html+='<div class="prediction-row"><span class="home">'+partido.home+'</span><div class="'+(grupoFinalizado?'prediction-score readonly':'prediction-score')+'">';
+    if(grupoFinalizado){
       const l=(saved.local!==undefined&&saved.local!==null)?saved.local:'-';
       const v=(saved.visitante!==undefined&&saved.visitante!==null)?saved.visitante:'-';
       html+='<span>'+l+' - '+v+'</span>';
@@ -502,12 +535,113 @@ function renderPanelAlumno(){
     html+='</div><span class="away">'+partido.away+'</span></div>';
   }
   html+='</div>';
-  if(bloqueado){
-    html+='<div style="margin-top:10px;font-size:0.8rem;color:#f1d293">Pronóstico bloqueado. Si tu email ya existía o ya enviaste, solo podés consultar.</div>';
+  if(!grupoFinalizado&&!finalizado){
+    html+='<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-blue" onclick="enviarPronosticoGrupo()">📋 Enviar Pronóstico de Grupo</button></div>';
+  }
+  if(!finalizado){
+    html+='<div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.08);padding-top:12px"><h4 style="color:var(--light-blue);font-size:0.9rem;margin-bottom:6px">⚽ Pronóstico de Jornada</h4><p style="font-size:0.75rem;color:#aaa;margin-bottom:8px">Elegí UN partido de una jornada aún no disputada para pronosticar (opcional).</p>';
+    html+=renderJornadaSelector(tieneJornada,userPronostico&&userPronostico.jornada);
+    html+='</div>';
+    html+='<div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px"><button class="btn btn-white" onclick="finalizarPronostico()">🔒 Finalizar Pronóstico</button></div>';
   }else{
-    html+='<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-blue" onclick="enviarPronostico()">Enviar Pronóstico</button></div>';
+    html+='<div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.08);padding-top:12px"><h4 style="color:var(--light-blue);font-size:0.9rem;margin-bottom:6px">⚽ Pronóstico de Jornada</h4>';
+    html+=renderJornadaReadOnly(userPronostico&&userPronostico.jornada);
+    html+='</div>';
+    html+='<div style="margin-top:10px;font-size:0.8rem;color:#f1d293">✅ Pronóstico finalizado. No podés modificar más.</div>';
   }
   panel.innerHTML=html;
+  if(!finalizado&&document.getElementById('j-grupo')){
+    setTimeout(actualizarJornadaMatches,50);
+  }
+}
+function finalizarHabilitado(grupoFinalizado,tieneJornada,jDisp){
+  if(tieneJornada)return true;
+  if(grupoFinalizado)return true;
+  if(jDisp.length>0)return true;
+  return false;
+}
+function renderJornadaSelector(tieneJornada,jornData){
+  const jDisp=jornadasDisponibles();
+  if(jDisp.length===0){
+    if(tieneJornada&&jornData){
+      return renderJornadaReadOnly(jornData)+'<div style="font-size:0.78rem;color:#888;font-style:italic;margin-top:4px">No hay otras jornadas disponibles (todas están completas o bloqueadas).</div>';
+    }
+    return '<div style="font-size:0.78rem;color:#888;font-style:italic">No hay jornadas disponibles para pronosticar (todas están completas o bloqueadas).</div>';
+  }
+  let h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">';
+  h+='<label for="j-grupo" style="font-size:0.8rem;color:#9fb6d1">Grupo</label>';
+  h+='<select id="j-grupo" onchange="actualizarJornadaMatches()" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">';
+  const gruposUnicos=[...new Set(jDisp.map(d=>d.grupo))].sort();
+  const jSelGrupo=jornData?jornData.grupo:(gruposUnicos[0]||'A');
+  for(const g of gruposUnicos){
+    h+='<option value="'+g+'" '+(jSelGrupo===g?'selected':'')+'>'+g+'</option>';
+  }
+  h+='</select>';
+  h+='<label for="j-jornada" style="font-size:0.8rem;color:#9fb6d1">Jornada</label>';
+  h+='<select id="j-jornada" onchange="actualizarJornadaMatches()" style="padding:5px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff">';
+  const jDispGrupo=jDisp.filter(d=>d.grupo===jSelGrupo);
+  const jSelJornada=jornData?jornData.jornadaIdx:(jDispGrupo[0]?jDispGrupo[0].jornadaIdx:0);
+  for(const d of jDispGrupo){
+    h+='<option value="'+d.jornadaIdx+'" '+(jSelJornada===d.jornadaIdx?'selected':'')+'>'+d.name+'</option>';
+  }
+  h+='</select></div>';
+  h+='<div id="j-match-options" style="margin-bottom:8px"></div>';
+  return h;
+}
+function renderJornadaReadOnly(jornData){
+  if(!jornData)return '<div style="font-size:0.78rem;color:#888;font-style:italic">No elegiste pronóstico de jornada.</div>';
+  const grupo=jornData.grupo,jIdx=jornData.jornadaIdx,mIdx=jornData.matchIdx;
+  const J=JORNADAS[jIdx];
+  const teams=GRUPOS[grupo].teams;
+  const jMatches=J.matches;
+  const matchIdx2=jMatches[0]===mIdx?jMatches[1]:jMatches[0];
+  const otroMatchIdx=matchIdx2;
+  const hIdx=state.grupos[grupo].matches[mIdx].h;
+  const aIdx=state.grupos[grupo].matches[mIdx].a;
+  const local=teams[hIdx],visitante=teams[aIdx];
+  const fL=FLAGS[local]||'',fV=FLAGS[visitante]||'';
+  let h='<div style="font-size:0.82rem;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid var(--light-blue)">';
+  h+='<span style="color:#9fb6d1;font-size:0.7rem">Grupo '+grupo+' · '+J.name+'</span><br>';
+  h+='<strong>'+fL+' '+local+'</strong> '+jornData.local+' - '+jornData.visitante+' <strong>'+fV+' '+visitante+'</strong>';
+  h+='</div>';
+  return h;
+}
+function actualizarJornadaMatches(){
+  const gSel=document.getElementById('j-grupo');
+  const jSel=document.getElementById('j-jornada');
+  if(!gSel||!jSel)return;
+  const grupo=gSel.value,jIdx=parseInt(jSel.value);
+  const jDisp=jornadasDisponibles();
+  const matches=JORNADAS[jIdx].matches;
+  const teams=GRUPOS[grupo].teams;
+  const stateMatches=state.grupos[grupo].matches;
+  const jDispGrupo=jDisp.filter(d=>d.grupo===grupo&&d.jornadaIdx===jIdx);
+  if(jDispGrupo.length===0){document.getElementById('j-match-options').innerHTML='<div style="font-size:0.78rem;color:#888;font-style:italic">Jornada no disponible.</div>';return;}
+  const bloqueado=isJornadaBloqueada(grupo,jIdx);
+  let h='<div style="font-size:0.78rem;color:#9fb6d1;margin-bottom:4px">Elegí UN partido de esta jornada:</div>';
+  const saved=userPronostico&&userPronostico.jornada;
+  const selMatchIdx=saved&&saved.grupo===grupo&&saved.jornadaIdx===jIdx?saved.matchIdx:null;
+  for(const mIdx of matches){
+    const m=stateMatches[mIdx];
+    if(m.hs!==null&&m.as!==null)continue;
+    const local=teams[m.h],visitante=teams[m.a];
+    const fL=FLAGS[local]||'',fV=FLAGS[visitante]||'';
+    const checked=selMatchIdx===mIdx?'checked':'';
+    const defScore=saved&&selMatchIdx===mIdx?{l:saved.local,v:saved.visitante}:{l:'',v:''};
+    h+='<div style="display:flex;align-items:center;gap:8px;padding:6px;background:rgba(255,255,255,0.03);border-radius:4px;margin-bottom:4px">';
+    h+='<input type="radio" name="j-match" value="'+mIdx+'" '+(checked||(!selMatchIdx&&matches.indexOf(mIdx)===0)?'checked':'')+' onchange="toggleJornadaMatchScore('+mIdx+',\''+grupo+'\','+jIdx+')">';
+    h+='<span style="flex:1">'+fL+' '+local+' vs '+fV+' '+visitante+'</span>';
+    h+='<span class="prediction-score" id="j-score-'+mIdx+'" style="'+((selMatchIdx===mIdx||(!selMatchIdx&&matches.indexOf(mIdx)===0))?'':'display:none')+'">';
+    h+='<input type="number" min="0" max="99" id="jl-'+mIdx+'" value="'+defScore.l+'" style="width:26px;height:28px;text-align:center;border:1px solid rgba(255,255,255,0.15);border-radius:3px;background:rgba(255,255,255,0.05);color:#fff;font-size:0.85rem"><span style="margin:0 3px;color:#888">vs</span><input type="number" min="0" max="99" id="jv-'+mIdx+'" value="'+defScore.v+'" style="width:26px;height:28px;text-align:center;border:1px solid rgba(255,255,255,0.15);border-radius:3px;background:rgba(255,255,255,0.05);color:#fff;font-size:0.85rem">';
+    h+='</span></div>';
+  }
+  document.getElementById('j-match-options').innerHTML=h;
+}
+function toggleJornadaMatchScore(selectedIdx,grupo,jIdx){
+  for(const mIdx of JORNADAS[jIdx].matches){
+    const el=document.getElementById('j-score-'+mIdx);
+    if(el)el.style.display=mIdx===selectedIdx?'':'none';
+  }
 }
 function cambiarGrupoPronostico(grupo){
   selectedPronosticoGroup=grupo;
@@ -568,7 +702,7 @@ async function ingresarAlumno(){
   if(!apodo){if(errorBox)errorBox.textContent='Ingresá un apodo.';return;}
   const existente=await getPronostico(email);
   if(existente){
-    currentUser={email,apodo:existente.apodo||apodo,readOnly:true};
+    currentUser={email,apodo:existente.apodo||apodo,readOnly:false};
     userPronostico=existente;
     if(existente.grupo)selectedPronosticoGroup=existente.grupo;
   }else{
@@ -579,8 +713,9 @@ async function ingresarAlumno(){
   if(modal)modal.style.display='none';
   renderPanelAlumno();
 }
-async function enviarPronostico(){
-  if(!currentUser||currentUser.readOnly||userPronostico)return;
+async function enviarPronosticoGrupo(){
+  if(!currentUser||userPronostico&&userPronostico.finalizado)return;
+  if(userPronostico&&Array.isArray(userPronostico.predicciones)){alert('Ya enviaste el pronóstico de grupo.');return;}
   const predicciones=[];
   for(let i=0;i<6;i++){
     const l=parseInt(document.getElementById('pred-'+i+'-l')?.value);
@@ -591,13 +726,70 @@ async function enviarPronostico(){
     }
     predicciones.push({matchIdx:i,local:l,visitante:v});
   }
-  const payload={apodo:currentUser.apodo,grupo:selectedPronosticoGroup,predicciones,fechaEnvio:new Date().toISOString()};
+  const payload={apodo:currentUser.apodo,grupo:selectedPronosticoGroup,predicciones,jornada:null,finalizado:false,fechaEnvio:new Date().toISOString()};
+  if(userPronostico&&userPronostico.jornada)payload.jornada=userPronostico.jornada;
   await setPronostico(currentUser.email,payload);
   userPronostico=payload;
-  currentUser.readOnly=true;
   renderPanelAlumno();
   if(isAdmin)renderTabPronosticos();
-  alert('✅ Pronóstico enviado y bloqueado.');
+  alert('✅ Pronóstico de grupo enviado. Ahora podés agregar un pronóstico de jornada.');
+}
+
+async function finalizarPronostico(){
+  if(!currentUser)return;
+  let predicciones=null,grupo=null;
+  if(userPronostico&&Array.isArray(userPronostico.predicciones)&&userPronostico.predicciones.length>0){
+    predicciones=userPronostico.predicciones;
+    grupo=userPronostico.grupo;
+  }else{
+    const preds=[];
+    for(let i=0;i<6;i++){
+      const l=parseInt(document.getElementById('pred-'+i+'-l')?.value);
+      const v=parseInt(document.getElementById('pred-'+i+'-v')?.value);
+      if(Number.isNaN(l)||l<0||Number.isNaN(v)||v<0)break;
+      preds.push({matchIdx:i,local:l,visitante:v});
+    }
+    if(preds.length===6){predicciones=preds;grupo=selectedPronosticoGroup;}
+  }
+  let jornadaData=null;
+  if(userPronostico&&userPronostico.jornada){
+    jornadaData=userPronostico.jornada;
+  }else{
+    const radio=document.querySelector('input[name="j-match"]:checked');
+    if(radio){
+      const mIdx=parseInt(radio.value);
+      const gSel=document.getElementById('j-grupo');
+      const jSel=document.getElementById('j-jornada');
+      if(gSel&&jSel){
+        const l=parseInt(document.getElementById('jl-'+mIdx)?.value);
+        const v=parseInt(document.getElementById('jv-'+mIdx)?.value);
+        if(!Number.isNaN(l)&&l>=0&&!Number.isNaN(v)&&v>=0){
+          jornadaData={grupo:gSel.value,jornadaIdx:parseInt(jSel.value),matchIdx:mIdx,local:l,visitante:v};
+        }
+      }
+    }
+  }
+  if(!predicciones&&!jornadaData){
+    alert('Completá al menos el pronóstico del grupo completo o el de una jornada antes de finalizar.');
+    return;
+  }
+  const payload={
+    apodo:currentUser.apodo,
+    grupo:grupo||'',
+    predicciones:predicciones||[],
+    jornada:jornadaData,
+    finalizado:true,
+    fechaEnvio:userPronostico&&userPronostico.fechaEnvio?userPronostico.fechaEnvio:new Date().toISOString()
+  };
+  await setPronostico(currentUser.email,payload);
+  userPronostico=payload;
+  renderPanelAlumno();
+  if(isAdmin)renderTabPronosticos();
+  let msg='✅ Pronóstico finalizado';
+  if(predicciones&&jornadaData)msg+=' (grupo + jornada)';
+  else if(predicciones)msg+=' (solo grupo)';
+  else msg+=' (solo jornada)';
+  alert(msg+'.');
 }
 async function renderTabPronosticos(){
   const cont=document.getElementById('tab-pronosticos');
@@ -629,8 +821,20 @@ async function renderTabPronosticos(){
   html+='<button class="btn btn-sm btn-white" onclick="toggleResultadosEditor()">📥 Cargar Resultados</button>';
   html+='</div></div>';
 
+  html+=renderJornadaBlockingPanel();
+
   html+='<div id="resultadosEditor" style="display:none;background:var(--card);border:2px solid var(--win);border-radius:10px;padding:12px;margin-bottom:12px">';
   html+='<h4 style="color:var(--win);font-size:0.9rem;margin-bottom:6px">📥 Cargar Resultados Reales</h4>';
+  html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">';
+  html+='<label for="jornadaFilter" style="font-size:0.8rem;color:#9fb6d1">Filtrar por Jornada:</label>';
+  html+='<select id="jornadaFilter" onchange="actualizarInfoJornadaFilter()" style="padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff">';
+  html+='<option value="-1">Todas las jornadas</option>';
+  html+='<option value="0">Jornada 1</option>';
+  html+='<option value="1">Jornada 2</option>';
+  html+='<option value="2">Jornada 3</option>';
+  html+='</select>';
+  html+='<span id="jornadaFilterInfo" style="font-size:0.7rem;color:#f1d293"></span>';
+  html+='</div>';
   html+='<p style="font-size:0.75rem;color:#aaa;margin-bottom:6px">Pegá los resultados acá. Formato: <code style="color:#9fc2ee">Grupo X:</code> abajo <code style="color:#9fc2ee">Equipo1 goles1-goles2 Equipo2</code>. Separá cada grupo con una línea en blanco.</p>';
   html+='<p style="font-size:0.75rem;color:#f1d293;margin-bottom:6px">💡 Ejemplo:<br><code style="color:#9fc2ee">Grupo A:<br>México 2-1 Sudáfrica<br>Corea del Sur 0-0 República Checa<br><br>Grupo B:<br>Canadá 3-0 Suiza</code></p>';
   html+='<textarea id="resultadosTextarea" rows="8" style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;font-family:monospace;font-size:0.8rem" placeholder="Grupo A:&#10;México 2-1 Sudáfrica&#10;..."></textarea>';
@@ -697,9 +901,47 @@ async function renderTabPronosticos(){
     html+='<div class="ganadores-box" style="border-color:#555;background:var(--card)"><h2 style="color:#888">🏆 GANADORES</h2><p style="color:#666;font-size:0.85rem">Aún no se cargaron resultados reales. Usá el botón <strong style="color:#9fc2ee">📥 Cargar Resultados</strong> de arriba para cargar los resultados del Mundial y descubrir quién ganó.</p></div>';
   }
 
+  const conJornada=sorted.filter(s=>s.email&&allPronos[s.email]&&allPronos[s.email].jornada);
+  if(conJornada.length>0){
+    const jornRank=[];
+    for(const st of sorted){
+      const pData=allPronos[st.email];
+      if(!pData||!pData.jornada)continue;
+      const jd=pData.jornada;
+      const realJ=state.grupos[jd.grupo]?.matches?.[jd.matchIdx];
+      const acertado=realJ&&realJ.hs!==null&&realJ.as!==null&&realJ.hs===jd.local&&realJ.as===jd.visitante;
+      jornRank.push({email:st.email,apodo:st.apodo,grupo:jd.grupo,jornadaIdx:jd.jornadaIdx,matchIdx:jd.matchIdx,local:jd.local,visitante:jd.visitante,acertado:acertado?true:false,evaluado:realJ&&realJ.hs!==null&&realJ.as!==null?true:false});
+    }
+    const aciertosJorn=jornRank.filter(j=>j.acertado).length;
+    html+='<div style="background:rgba(243,156,18,0.06);border-radius:10px;padding:12px;margin-bottom:12px;border:1px solid rgba(243,156,18,0.2)">';
+    html+='<h4 style="color:#f39c12;font-size:0.9rem;margin-bottom:6px">⚽ Ranking de Aciertos de Jornada</h4>';
+    html+='<p style="font-size:0.75rem;color:#aaa;margin-bottom:8px">'+jornRank.filter(j=>j.evaluado).length+' pronósticos de jornada evaluados · '+aciertosJorn+' aciertos</p>';
+    html+='<table class="stats-table"><thead><tr><th>Alumno</th><th>Jornada</th><th>Pronóstico</th><th>Real</th><th>Resultado</th></tr></thead><tbody>';
+    for(const jr of jornRank){
+      const teams=GRUPOS[jr.grupo].teams;
+      const jMatch=state.grupos[jr.grupo].matches[jr.matchIdx];
+      const local=teams[jMatch.h],visitante=teams[jMatch.a];
+      const fL=FLAGS[local]||'',fV=FLAGS[visitante]||'';
+      const realTxt=jMatch.hs!==null?jMatch.hs+' - '+jMatch.as:'Pendiente';
+      html+='<tr><td>'+jr.apodo+'</td><td style="font-size:0.7rem">'+jr.grupo+' · J'+(jr.jornadaIdx+1)+'</td><td>'+fL+' '+jr.local+' - '+jr.visitante+' '+fV+'</td><td>'+realTxt+'</td><td>'+(jr.evaluado?(jr.acertado?'✅':'❌'):'—')+'</td></tr>';
+    }
+    html+='</tbody></table></div>';
+  }
+
   for(const st of sorted){
     const grupo=st.grupo;
     const preds=st.preds;
+    const pData=allPronos[st.email];
+    const jornData=pData&&pData.jornada;
+    let jornOk='—',jornBg='rgba(255,255,255,0.03)',jornAcertado=false;
+    if(jornData){
+      const realJ=state.grupos[jornData.grupo]?.matches?.[jornData.matchIdx];
+      if(realJ&&realJ.hs!==null&&realJ.as!==null){
+        jornAcertado=(realJ.hs===jornData.local&&realJ.as===jornData.visitante);
+        jornOk=jornAcertado?'✅':'❌';
+        jornBg=jornAcertado?'rgba(39,174,96,0.1)':'rgba(231,76,60,0.08)';
+      }
+    }
     html+='<div style="background:var(--card);border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.06)">';
     html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px">';
     html+='<span><strong style="color:#fff;font-size:0.85rem">'+(st.apodo)+'</strong> <span style="color:#9fb6d1;font-size:0.75rem">('+st.email+')</span> <button class="btn-eliminar" onclick="eliminarPronostico(\''+st.email+'\')" title="Eliminar este pronóstico">🗑️</button></span>';
@@ -726,11 +968,55 @@ async function renderTabPronosticos(){
       html+='<span style="text-align:center;font-size:0.9rem">'+ok+'</span>';
       html+='</div>';
     }
+    if(jornData){
+      const teams=GRUPOS[jornData.grupo].teams;
+      const jMatch=state.grupos[jornData.grupo].matches[jornData.matchIdx];
+      const local=teams[jMatch.h],visitante=teams[jMatch.a];
+      const fL=FLAGS[local]||'',fV=FLAGS[visitante]||'';
+      const realJ=jMatch.hs!==null?jMatch.hs+' - '+jMatch.as:'Pendiente';
+      const jTxt=jornData.local+' - '+jornData.visitante;
+      html+='<div style="display:grid;grid-template-columns:1fr 60px 60px 30px;gap:6px;align-items:center;font-size:0.78rem;padding:4px 6px;background:'+jornBg+';border-radius:4px;border-left:2px solid #f39c12">';
+      html+='<span><span style="color:#f39c12">⚽ Jornada</span> '+fL+' '+local+' vs '+fV+' '+visitante+' <span style="color:#888;font-size:0.7rem">('+jornData.grupo+' · J'+(jornData.jornadaIdx+1)+')</span></span>';
+      html+='<span style="text-align:center;color:#aaa">'+jTxt+'</span>';
+      html+='<span style="text-align:center;font-weight:600;color:'+(jMatch.hs!==null?'#fff':'#666')+'">'+realJ+'</span>';
+      html+='<span style="text-align:center;font-size:0.9rem">'+jornOk+'</span>';
+      html+='</div>';
+    }
     html+='</div></div>';
   }
 
   cont.innerHTML=html;
 }
+async function toggleJornadaBloqueo(gid, jIdx){
+  if(!isAdmin)return;
+  const key=gid+'-'+jIdx;
+  const idx=state.jornadasBloqueadas.indexOf(key);
+  if(idx===-1)state.jornadasBloqueadas.push(key);
+  else state.jornadasBloqueadas.splice(idx,1);
+  await save();
+  renderTabPronosticos();
+}
+function renderJornadaBlockingPanel(){
+  let h='<div style="background:var(--card);border-radius:10px;padding:12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.06)">';
+  h+='<h4 style="color:var(--light-blue);font-size:0.9rem;margin-bottom:6px">🔒 Bloqueo de Jornadas</h4>';
+  h+='<p style="font-size:0.75rem;color:#aaa;margin-bottom:8px">Bloqueá una jornada si ya se jugó y querés evitar que alumnos elijan partidos con resultado conocido. Si nadie acertó una jornada, bloqueala para que no puedan elegirla.</p>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px">';
+  for(const gid of Object.keys(GRUPOS)){
+    for(let j=0;j<JORNADAS.length;j++){
+      const key=gid+'-'+j;
+      const bloqueada=state.jornadasBloqueadas.includes(key);
+      const completa=isJornadaCompleta(gid,j);
+      h+='<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:'+(bloqueada?'rgba(231,76,60,0.12)':completa?'rgba(39,174,96,0.12)':'rgba(255,255,255,0.03)')+';border-radius:4px;font-size:0.75rem">';
+      h+='<span style="min-width:50px">'+gid+' · J'+(j+1)+'</span>';
+      h+='<span style="flex:1;color:'+(bloqueada?'#e74c3c':completa?'#2ecc71':'#aaa')+'">'+(bloqueada?'🔒 Bloqueada':completa?'✅ Completa':'🟢 Disponible')+'</span>';
+      h+='<button class="btn btn-sm '+(bloqueada?'btn-blue':'btn-danger')+'" onclick="toggleJornadaBloqueo(\''+gid+'\','+j+')">'+(bloqueada?'Desbloquear':'Bloquear')+'</button>';
+      h+='</div>';
+    }
+  }
+  h+='</div></div>';
+  return h;
+}
+
 async function toggleAdminMode(){
   if(isAdmin){
     isAdmin=false;
@@ -760,14 +1046,35 @@ async function cambiarPassword() {
   alert('✅ Contraseña cambiada exitosamente.');
 }
 
+function actualizarInfoJornadaFilter(){
+  const sel=document.getElementById('jornadaFilter');
+  const info=document.getElementById('jornadaFilterInfo');
+  if(!sel||!info)return;
+  const v=parseInt(sel.value);
+  if(v<0){info.textContent='';return;}
+  const J=JORNADAS[v];
+  const partidosDesc=[];
+  for(const gid of Object.keys(GRUPOS).slice(0,2)){
+    const teams=GRUPOS[gid].teams;
+    const m0=state.grupos[gid].matches[J.matches[0]];
+    const m1=state.grupos[gid].matches[J.matches[1]];
+    partidosDesc.push(gid+': '+teams[m0.h]+' vs '+teams[m0.a]+' · '+teams[m1.h]+' vs '+teams[m1.a]);
+  }
+  info.textContent='Solo se cargarán partidos de '+J.name+' (ej: '+partidosDesc.join(' | ')+' ...)';
+}
 function toggleResultadosEditor(){
   const ed=document.getElementById('resultadosEditor');
-  if(ed)ed.style.display=ed.style.display==='none'?'block':'none';
+  if(ed){
+    ed.style.display=ed.style.display==='none'?'block':'none';
+    if(ed.style.display==='block')setTimeout(actualizarInfoJornadaFilter,50);
+  }
 }
 
 async function cargarResultadosReales(){
   const textarea=document.getElementById('resultadosTextarea');
   if(!textarea||!textarea.value.trim()){alert('Pegá los resultados en el campo de texto primero.');return;}
+  const jornadaFilter=document.getElementById('jornadaFilter');
+  const jIdx=jornadaFilter?parseInt(jornadaFilter.value):-1;
   const lineas=textarea.value.split('\n').map(l=>l.trim()).filter(l=>l);
   let grupoActual=null;
   let cargados=0;
@@ -784,6 +1091,7 @@ async function cargarResultadosReales(){
     if(hIdx===-1||aIdx===-1)continue;
     const matches=state.grupos[grupoActual].matches;
     for(let i=0;i<matches.length;i++){
+      if(jIdx>=0&&!JORNADAS[jIdx].matches.includes(i))continue;
       const m=matches[i];
       if(m.h===hIdx&&m.a===aIdx){
         m.hs=golL;m.as=golV;
@@ -804,7 +1112,7 @@ async function cargarResultadosReales(){
   renderBracket();
   renderChampion();
   renderTabPronosticos();
-  alert('✅ '+cargados+' resultados cargados exitosamente.');
+  alert('✅ '+cargados+' resultados cargados exitosamente'+(jIdx>=0?' para '+JORNADAS[jIdx].name:'')+'.');
 }
 
 async function exportarPronosticos(){
